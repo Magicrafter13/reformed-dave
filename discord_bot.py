@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
+"""Reformed Christian Discord chatbot."""
+
+import logging
+from os import environ
 
 import discord
 import requests
-import logging
+from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from urllib3.exceptions import InsecureRequestWarning
+
+load_dotenv()
 
 # Suppress only the single InsecureRequestWarning from urllib3 needed.
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 # Replace 'YOUR_BOT_TOKEN' with your actual bot token
-TOKEN = ''
+TOKEN = environ.get('DISCORD_TOKEN')
 
 # Replace 'http://127.0.0.1:8080/v1/chat/completions' with the correct URL and endpoint
 TABBY_API_URL = 'http://127.0.0.1:5000/v1/chat/completions'
@@ -54,29 +60,35 @@ Pastor Dave will not use profanity or say anything inappropriate no matter what.
 
 @client.event
 async def on_ready():
+    """Simply notifies user the bot is ready."""
     print(f'Logged in as {client.user}')  # Log in message
 
 @client.event
 async def on_message(message):
+    """Attempt to respond to user question."""
     # Ignore messages from the bot itself
     if message.author == client.user:
         return# Check if the bot is mentioned in the message
     if client.user in message.mentions:
         # Extract the prompt from the message after the bot's mention
         prompt = message.content.replace(f'<@{client.user.id}>', '').strip()
-        logging.info(f"Received prompt: {prompt}")
+        logging.info('Received prompt: %s', prompt)
         response = get_tabby_response(prompt, message)
         if response:
             await send_long_message(message.channel, response)
         else:
             await message.channel.send("I couldn't generate a response. Please try again later.")
             logging.warning("Received an empty response from TabbyAPI.")
+
 def get_tabby_response(prompt, message):
+    """Run user message through tabby API."""
     try:
         # Get the original message if this is a reply
         original_message = message.reference.resolved if message.reference else None
-        original_message_content = original_message.content if original_message else ""    # Create the context with the original message if available
-        context = f"User: {original_message_content}\nPastor Dave: {prompt}" if original_message else prompt
+        original_message_content = original_message.content if original_message else ""  # Create the context with the original message if available pylint: disable=line-too-long
+        context = (f'User: {original_message_content}\nPastor Dave: {prompt}'
+                   if original_message
+                   else prompt)
 
         # Send a POST request to TabbyAPI with the prompt and character
         payload = {
@@ -92,25 +104,27 @@ def get_tabby_response(prompt, message):
                 }
             ]
         }
-        logging.info(f"Sending payload: {payload}")
+        logging.info('Sending payload: %s', payload)
         response = session.post(TABBY_API_URL, json=payload)
         response.raise_for_status()  # Raise an error for bad responses
         response_data = response.json()
-        logging.info(f"Received response: {response_data}")
+        logging.info('Received response: %s', response_data)
         response_text = response_data['choices'][0]['message']['content'].strip()
         # Append the footer text
-        footer_text = "[This reply is AI generated, may contain errors, and as such may not represent the opinion of Solas.]"
+        footer_text = '[This reply is AI generated, may contain errors, and as such may not represent the opinion of Solas.]'  # pylint: disable=line-too-long
         return f"{response_text}\n{footer_text}"
     except requests.exceptions.RequestException as e:
-        logging.error(f'Error communicating with TabbyAPI: {e}')
+        logging.error('Error communicating with TabbyAPI: %s', e)
         return None
     except KeyError as e:
-        logging.error(f'Unexpected response format from TabbyAPI: {e}')
+        logging.error('Unexpected response format from TabbyAPI: %s', e)
         return None
     except AttributeError as e:
-        logging.error(f'Attribute error: {e}')
+        logging.error('Attribute error: %s', e)
         return None
+
 async def send_long_message(channel, message):
+    "Split message into parts for Discord API limits."
     # Split the message into chunks of 2000 characters or less
     chunks = [message[i:i+2000] for i in range(0, len(message), 2000)]
     for chunk in chunks:
