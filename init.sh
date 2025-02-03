@@ -21,6 +21,9 @@ cd tabbyAPI/models
 git clone "$MODEL"
 cd -
 
+# Setup Discord bot
+sed -i "s/python3/python$PYVER/" discord.sh
+
 # Setup tabbyAPI
 echo 'Doing first time tabbyAPI setup.'
 echo 'Follow on-screen instructions, and when its finally up and running on port 5000,'

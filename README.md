@@ -33,3 +33,13 @@ the bot and the API.
 <div align="center">
 In loving memory of "D20joy".
 </div>
+<br />
+<div align="center">
+Romans 8:37-39 LSB
+
+But in all these things we overwhelmingly conquer through Him who loved us.  
+For I am convinced that neither death, nor life, nor angels, nor rulers, nor
+things present, nor things to come, nor powers,  
+nor height, nor depth, nor any other created thing, will be able to separate us
+from the love of God, which is in Christ Jesus our Lord.
+</div>
