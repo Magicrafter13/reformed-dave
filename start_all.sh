@@ -1,8 +1,4 @@
-#!/bin/bash
-
-# FIRST, make sure files are linked
-[ ! -f ./tabbyAPI/config.yml ] && ln ./config.yml ./tabbyAPI/config.yml
-[ ! -f ./tabbyAPI/sampler_overrides/dave_preset.yml ] && ln ./dave_preset.yml ./tabbyAPI/sampler_overrides/dave_preset.yml
+#!/usr/bin/bash
 
 # Get random session ID
 session=$RANDOM
