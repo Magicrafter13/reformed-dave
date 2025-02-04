@@ -1,7 +1,11 @@
 #!/usr/bin/bash
 
 # Get random session ID
-session=$RANDOM
+session=$$
+while tmux has-session -t "discord-$session"
+do
+	session=$RANDOM
+done
 
 # Start tabbyAPI
 echo "Starting TabbyAPI..."
