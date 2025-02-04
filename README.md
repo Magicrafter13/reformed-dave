@@ -5,19 +5,32 @@ align with Reformed Presbyterians.
 
 # Running
 ## First Time Setup
+### With included tabbyAPI scripts/setup.
 Requirements:
 - git-lfs
 - Python 3.10-3.12
 - tmux
 
-Some basic setup is done by `init.sh`. Before running it, keep reading.
+Some basic setup is done by `init_all.sh`. Before running it, keep reading.
 
 TabbyAPI currently requires Python 3.10, 3.11, or 3.12. This repo will assume
-that 3.12 is installed. You can change this in `init.sh`.
+that 3.12 is installed. You can change this in `init_all.sh`.
 
 Before automating this with systemd or some other such service, please run
 `start_all.sh` in an interactive session. The first time it is run through, it
 will setup tabbyAPI.
+
+### With existing tabbyAPI setup.
+If you do not wish to use the tabbyAPI setup included in this repository (or you
+already have one setup you want to use), then the steps above are essentially
+the same, except you only need to run `init.sh` to get the Discord bot ready,
+and then `start.sh` to start the Discord bot. By taking this route you are
+responsible for properly connecting the bot to the API (for example if you
+changed the port, or run it on a different IP), as well as getting the Pastor
+Dave model working in tabby.
+
+Consider this the advanced route - but it is understandable that someone may
+wish to use an existing tabbyAPI installation.
 
 ## Standard Operation
 Simply run `start_all.sh`. It will launch tabbyAPI in a tmux session, wait for a
