@@ -9,7 +9,7 @@ tmux new -d -s "tabby-$session"
 tmux send -t "tabby-$session" "cd tabbyAPI" C-m "./start.sh" C-m
 
 # Wait for TabbyAPI to start (adjust the sleep time if necessary)
-sleep 60
+sleep 10
 
 # Start Discord bot
 echo "Starting Discord bot..."
