@@ -38,6 +38,12 @@ bit, then start the Discord bot. You can exit the script by typing
 quit/stop/exit, or sending an interrupt signal, and it should cleanup by closing
 the bot and the API.
 
+## Additional Info
+For tighter control/safety, create a file `blocked_phrases.txt`. Each line will
+be checked against in both the user prompt, and Dave's output. If either one
+contains a blacklisted word/phrase, default responses (defined in
+`discord_bot.py`) will be used instead.
+
 # Credits/Notes
 - Based on the work of "D20joy".
 - Original setup/version by "sleepdeprived3".

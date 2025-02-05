@@ -12,10 +12,6 @@ fi
 
 # Get tabbyAPI
 git submodule update --init
-# Place configuration files
-ln ./config.yml ./tabbyAPI/config.yml
-ln ./dave_preset.yml ./tabbyAPI/sampler_overrides/dave_preset.yml
-
 # Get model
 cd tabbyAPI/models
 git clone "$MODEL"

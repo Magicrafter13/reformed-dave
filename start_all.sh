@@ -7,6 +7,16 @@ do
 	session=$RANDOM
 done
 
+# Place configuration files
+if ! cmp ./config.yml ./tabbyAPI/config.yml &> /dev/null
+then
+	ln -f ./config.yml ./tabbyAPI/config.yml
+fi
+if ! cmp ./dave_preset.yml ./tabbyAPI/sampler_overrides/dave_preset.yml &> /dev/null
+then
+	ln -f ./dave_preset.yml ./tabbyAPI/sampler_overrides/dave_preset.yml
+fi
+
 # Start tabbyAPI
 echo "Starting TabbyAPI..."
 tmux new -d -s "tabby-$session"
