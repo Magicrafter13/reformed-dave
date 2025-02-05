@@ -108,7 +108,7 @@ def get_tabby_response(prompt, message):
         response.raise_for_status()  # Raise an error for bad responses
         response_data = response.json()
         logging.info('Received response: %s', response_data)
-        response_text = response_data['choices'][0]['message']['content'].strip()
+        response_text = response_data['choices'][0]['message']['content'].strip().removeprefix('Pastor Dave: ')  # pylint: disable=line-too-long
         # Append the footer text
         footer_text = '[This reply is AI generated, may contain errors, and as such may not represent the opinion of Solas.]'  # pylint: disable=line-too-long
         return f"{response_text}\n{footer_text}"
