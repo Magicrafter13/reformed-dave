@@ -16,7 +16,6 @@ load_dotenv()
 # Suppress only the single InsecureRequestWarning from urllib3 needed.
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
-# Replace 'YOUR_BOT_TOKEN' with your actual bot token
 TOKEN = environ.get('DISCORD_TOKEN')
 
 # Replace 'http://127.0.0.1:8080/v1/chat/completions' with the correct URL and endpoint
@@ -86,7 +85,7 @@ def get_tabby_response(prompt, message):
         # Get the original message if this is a reply
         original_message = message.reference.resolved if message.reference else None
         original_message_content = original_message.content if original_message else ""  # Create the context with the original message if available pylint: disable=line-too-long
-        context = (f'User: {original_message_content}\nPastor Dave: {prompt}'
+        context = (f'{"Pastor Dave" if original_message.author == client.user else "User"}: {original_message_content}\nUser: {prompt}'  # pylint: disable=line-too-long
                    if original_message
                    else prompt)
 
@@ -124,7 +123,7 @@ def get_tabby_response(prompt, message):
         return None
 
 async def send_long_message(channel, message):
-    "Split message into parts for Discord API limits."
+    """Split message into parts for Discord API limits."""
     # Split the message into chunks of 2000 characters or less
     chunks = [message[i:i+2000] for i in range(0, len(message), 2000)]
     for chunk in chunks:
