@@ -152,7 +152,7 @@ async def on_message(message):
         if contains_prohibited_content(prompt):
             logging.warning('Blocked prohibited content in initial prompt')
             return await message.channel.send(
-                "I must decline this request. For sensitive matters, please spepak with "
+                "I must decline this request. For sensitive matters, please speak with "
                 "your church elders or trusted Christian mentors. 'The fear of the LORD "
                 "is the beginning of knowledge...' (Proverbs 1:7)"
             )
