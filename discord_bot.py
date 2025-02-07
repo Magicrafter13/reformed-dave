@@ -216,8 +216,16 @@ def get_tabby_response(prompt, message):
 
 async def send_long_message(channel, message):
     """Split message into parts for Discord API limits."""
-    chunks = [message[i:i+2000] for i in range(0, len(message), 2000)]
-    for chunk in chunks:
+    length = len(message)
+    _i = 0
+    while _i < length:
+        chunk = message[_i:_i + 2000]
+        if len(chunk) == 2000 and chunk[-1] != ' ':
+            space = chunk.rfind(' ')
+            chunk = chunk[:space]
+            _i += space + 1
+        else:
+            _i += 2000
         await channel.send(chunk)
 
 client.run(TOKEN)
