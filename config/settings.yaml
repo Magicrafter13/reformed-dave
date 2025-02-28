@@ -1,0 +1,9 @@
+# Storage settings
+use_file_storage: false  # true for JSONL files, false for RAM
+
+# Conversation limits (2 messages = 1 exchange, 4 characters ≈ 1 token)
+max_history_messages: 20
+max_context_chars: 16000
+
+# Advanced settings
+max_api_tokens: 8192

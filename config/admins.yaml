@@ -1,0 +1,3 @@
+# List of channel IDs for blocked content reports
+report_channels:
+  - "826591274601986748"  # Example channel ID 1

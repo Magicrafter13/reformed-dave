@@ -1,3 +1,4 @@
 # Discord bot
-/.env
+/config/.env
+/config/blocked_phrases.txt
 /venv/
