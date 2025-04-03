@@ -353,14 +353,6 @@ async def on_message(message):
             response_text = response_data['choices'][0]['message']['content'].strip()
             response_text = response_text.removeprefix('Pastor Dave: ')
 
-            # Post-process to remove prohibited terms
-            cleaned_response = re.sub(
-                r'\b(child|son|my dear)\b',
-                '',
-                response_text,
-                flags=re.IGNORECASE
-            ).strip()
-
             # Check response for blocked content
             response_blocked = contains_prohibited_content(cleaned_response)
             if response_blocked:
