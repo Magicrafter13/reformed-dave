@@ -354,21 +354,21 @@ async def on_message(message):
             response_text = response_text.removeprefix('Pastor Dave: ')
 
             # Check response for blocked content
-            response_blocked = contains_prohibited_content(cleaned_response)
+            response_blocked = contains_prohibited_content(response_text)
             if response_blocked:
                 logging.warning('Blocked response content')
                 await notify_mod_channels(message, prompt, response_blocked, response_text)
                 return  # Don't add to history
 
-            if not validate_response(cleaned_response):
-                logging.warning('Incomplete response ending with: %s', cleaned_response[-20:])
+            if not validate_response(response_text):
+                logging.warning('Incomplete response ending with: %s', response_text[-20:])
                 return
 
             # Add bot response to history
-            cm.add_message('assistant', cleaned_response)
+            cm.add_message('assistant', response_text)
 
             footer_text = '[This reply is AI generated, may contain errors, and as such may not represent the opinion of Solas.]'  # pylint: disable=line-too-long
-            await send_long_message(message.channel, cleaned_response, footer_text)
+            await send_long_message(message.channel, response_text, footer_text)
 
         except requests.exceptions.RequestException as e:
             logging.error('API communication error: %s', e)
