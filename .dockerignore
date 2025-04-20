@@ -1,0 +1,8 @@
+# Univeral directories
+__pycache__/
+/venv/
+/tabbyAPI/venv
+
+# Dev/live tests
+/tabbyAPI/models/
+/tabbyAPI/start_options.json

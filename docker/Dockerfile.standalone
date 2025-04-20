@@ -1,0 +1,4 @@
+# Without TabbyAPI
+FROM dave
+
+CMD ["python" "discord_bot.py"]

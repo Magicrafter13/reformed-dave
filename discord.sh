@@ -4,7 +4,7 @@ if [ ! -d "venv" ]; then
 	echo Creating venv
 	python3 -m venv venv
 
-	venv/bin/pip install discord python-dotenv requests urllib3 pyyaml
+	venv/bin/pip install -r requirements.txt
 fi
 
 echo Activating venv

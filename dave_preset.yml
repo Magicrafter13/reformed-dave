@@ -105,7 +105,7 @@ penalty_range:
 
 # MARK: DRY
 dry_multiplier:
-  override: 0.0
+  override: 0.01
   force: false
 dry_base:
   override: 0.0
