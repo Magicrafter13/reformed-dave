@@ -46,10 +46,10 @@ temperature_last:
   force: false
 min_temp:
   override: 0
-  force: true
+  force: false
 max_temp:
   override: 0
-  force: true
+  force: false
 temp_exponent:
   override: 1.0
   force: false
@@ -95,7 +95,7 @@ presence_penalty:
   force: false
 repetition_penalty:
   override: 1.0
-  force: false
+  force: true
 repetition_decay:
   override: 0
   force: false
@@ -105,17 +105,17 @@ penalty_range:
 
 # MARK: DRY
 dry_multiplier:
-  override: 0.01
-  force: false
+  override: 1.01
+  force: true
 dry_base:
-  override: 0.0
-  force: false
+  override: 1.75
+  force: true
 dry_allowed_length:
-  override: 0
-  force: false
+  override: 10
+  force: true
 dry_range:
   override: 0
-  force: false
+  force: true
 dry_sequence_breakers:
   override: []
   force: false
