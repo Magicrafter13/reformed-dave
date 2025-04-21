@@ -20,7 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt --root-user-action
+RUN pip install --no-cache-dir -r requirements.txt --root-user-action ignore
 
 COPY discord_bot.py ./
 #ADD https://www.nerdfonts.com/assets/css/webfont.css blog/static/nerdfont.css

@@ -1,12 +1,19 @@
 # With TabbyAPI
 FROM dave
 
-ENV MODEL='https://huggingface.co/sleepdeprived3/sleepdeprived3_Reformed-Christian-Bible-Expert-12B_EXL2_5.5bpw_H8'
-
+# Keep tabby stuff at the top for caching PLEASE 😩
 COPY tabbyAPI ./tabbyAPI
 RUN ["sh", "-c", "cd /app/tabbyAPI; python start.py --update-deps << EOF\nA\nEOF"]
+COPY docker/tabby/install_gitlfs.sh ./
+RUN ["sh", "-c", "./install_gitlfs.sh; rm install_gitlfs.sh"]
+
+ENV MODEL='https://huggingface.co/sleepdeprived3/Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_5.5bpw_H8'
+
 COPY config.yml ./tabbyAPI/config.yml
 COPY dave_preset.yml ./tabbyAPI/sampler_overrides/
+RUN ["sh", "-c", "echo '{\"gpu_lib\": \"cu121\", \"first_run_done\": true}' > tabbyAPI/start_options.json"]
 
-COPY docker/tabby/entrypoint.sh ./
+COPY config ./config
+COPY discord_bot.py docker/tabby/entrypoint.sh ./
+
 CMD ["./entrypoint.sh"]

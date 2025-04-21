@@ -6,3 +6,5 @@ __pycache__/
 # Dev/live tests
 /tabbyAPI/models/
 /tabbyAPI/start_options.json
+/config/.env
+/config/blocked_phrases.txt
