@@ -42,8 +42,8 @@ temperature:
   override: 0
   force: true
 temperature_last:
-  override: false
-  force: false
+  override: 0
+  force: true
 min_temp:
   override: 0
   force: false

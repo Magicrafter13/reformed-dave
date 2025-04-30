@@ -379,7 +379,7 @@ async def on_message(message):
 
 async def send_long_message(channel, response_text, footer_text):
     """Handle message splitting with footer."""
-    max_chunk = 1990
+    max_chunk = 1980
 
     chunks = []
     while response_text:
