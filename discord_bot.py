@@ -257,7 +257,7 @@ async def process_question(message, question):
                     completion = await asyncio.wait_for(
                         asyncio.to_thread(
                             client.chat.completions.create,
-                            model="gpt-3.5-turbo", #changed model name.  Original model may not be available in tabby.
+                            model="Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_5.5bpw_H8",
                             messages=messages,
                             temperature=0.0,  # Set to 0 for deterministic output
                             max_tokens=15872,
