@@ -2,424 +2,426 @@
 """Reformed Christian Discord chatbot."""
 
 import asyncio
-import json
-import logging
+import os
 import random
-import re
-import sys
+import traceback
 from datetime import datetime
-from os import environ
-from pathlib import Path
 
 import discord
-import requests
-import yaml
+from discord.ext import commands
 from dotenv import load_dotenv
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-from urllib3.exceptions import InsecureRequestWarning
+from openai import OpenAI
 
-# Configuration paths
-CONFIG_DIR = Path('config')
-SETTINGS_FILE = CONFIG_DIR / 'settings.yaml'
-ADMINS_FILE = CONFIG_DIR / 'admins.yaml'
-CONVERSATION_DIR = Path('conversations')
-DEBUG_PROMPT_FILE = Path('debug_prompt.txt')
+from config import (
+    BOT_PERMISSIONS,
+    COMMAND_PREFIX,
+    ENABLE_PROMPT_LOGGING,
+    HELP_MESSAGE,
+    MAX_PROMPT_LENGTH,
+    MAX_RETRIES,
+    MONITORING_CHANNEL_ID,
+    PROMPT_LOG_FILE,
+    TIMEOUT_SECONDS
+)
+from utils.prompt_handler import create_prompt
+from utils.response_formatter import format_response
+from utils.conversation_manager import ConversationManager
+from utils.content_filter import load_blocked_phrases, contains_blocked_phrase
+from config import BOT_PERMISSIONS, COMMAND_PREFIX, HELP_MESSAGE, MAX_RETRIES, TIMEOUT_SECONDS
 
-BLOCKED_PHRASES_FILE = CONFIG_DIR / 'blocked_phrases.txt'
-CHARACTER_CONTEXT_FILE = CONFIG_DIR / 'character_context.txt'
-SYSTEM_PROMPT_FILE = CONFIG_DIR / 'system_prompt.txt'
-ENV_FILE = CONFIG_DIR / '.env'
+# Initialize conversation manager
+conversation_manager = ConversationManager()
 
-# Create directories if needed
-CONVERSATION_DIR.mkdir(exist_ok=True)
+# Load environment variables and blocked phrases
+blocked_phrases = load_blocked_phrases()
+load_dotenv()
 
-# Load settings
-try:
-    with open(SETTINGS_FILE, 'r', encoding='utf-8') as _f:
-        settings = yaml.safe_load(_f)
-        USE_FILE_STORAGE = settings.get('use_file_storage', True)
-        MAX_HISTORY_MESSAGES = settings.get('max_history_messages', 20)
-        MAX_CONTEXT_CHARS = settings.get('max_context_chars', 16000)
-        MAX_API_TOKENS = settings.get('max_api_tokens', 8192)
-except FileNotFoundError:
-    logging.critical('Missing required file: %s', SETTINGS_FILE)
-    sys.exit(1)
-except yaml.YAMLError as e:
-    logging.critical('Invalid YAML in %s: %s', SETTINGS_FILE, e)
-    sys.exit(1)
-
-# Load report channels
-try:
-    with open(ADMINS_FILE, 'r', encoding='utf-8') as _f:
-        channel_data = yaml.safe_load(_f)
-        REPORT_CHANNELS = set(channel_data.get('report_channels', []))
-except FileNotFoundError:
-    logging.warning('No report channels file found, proceeding without reporting')
-    REPORT_CHANNELS = set()
-except yaml.YAMLError as e:
-    logging.error('Invalid report channels format: %s', e)
-    REPORT_CHANNELS = set()
-
-# Load environment variables
-load_dotenv(ENV_FILE)
-
-# Suppress only the single InsecureRequestWarning from urllib3 needed.
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
-
-# Discord setup
-TOKEN = environ.get('DISCORD_BOT_TOKEN')
-if not TOKEN:
-    logging.critical('DISCORD_BOT_TOKEN not found in environment variables')
-    sys.exit(1)
-
-TABBY_API_URL = 'http://127.0.0.1:5000/v1/chat/completions'
-
+# Initialize Discord bot with explicit intents
 intents = discord.Intents.default()
 intents.message_content = True
-client = discord.Client(intents=intents)
+intents.guild_messages = True
+intents.guilds = True
+intents.guild_reactions = True
+bot = commands.Bot(
+    command_prefix=COMMAND_PREFIX,
+    intents=intents,
+    help_command=None  # Disable default help command to avoid conflicts
+)
 
-# Logging configuration
-logging.basicConfig(level=logging.INFO)
+# Initialize OpenAI client with TabbyAPI endpoint
+client = OpenAI(
+    base_url="http://127.0.0.1:5000/v1",
+    api_key="not-needed"  # TabbyAPI doesn't require an API key
+)
 
-def load_text_file(file_path):
-    """Load and validate text file content."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as _f:
-            content = _f.read().strip()
-            if not content:
-                logging.error('File %s is empty', file_path)
-                raise ValueError(f'Empty file: {file_path}')
-            return content
-    except FileNotFoundError:
-        logging.critical('Missing required file: %s', file_path)
-        raise
-    except Exception as e:
-        logging.critical('Error loading %s: %s', file_path, e)
-        raise
-
-# Load content files
-try:
-    BLOCKED_PHRASES = set()
-    if BLOCKED_PHRASES_FILE.exists():
-        with open(BLOCKED_PHRASES_FILE, 'r', encoding='utf-8') as _f:
-            BLOCKED_PHRASES = {line.strip().lower() for line in _f if line.strip()}
-
-    CHARACTER_CONTEXT = load_text_file(CHARACTER_CONTEXT_FILE)
-    SYSTEM_PROMPT = load_text_file(SYSTEM_PROMPT_FILE)
-except Exception as e:  # TODO: actually handle specific exceptions pylint: disable=broad-exception-caught
-    logging.critical('Initialization failed: %s', str(e))
-    sys.exit(1)
-
-# HTTP session configuration
-session = requests.Session()
-retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-session.mount('http://', HTTPAdapter(max_retries=retries))
-
-class ConversationManager:
-    """LLM conversation history."""
-
-    def __init__(self, user_id: int):
-        """Create empty conversation, and file if requested."""
-        self.user_id = user_id
-        self.max_context_chars = MAX_CONTEXT_CHARS
-        self.file_path = CONVERSATION_DIR / f'user_{user_id}.jsonl' if USE_FILE_STORAGE else None
-        self._history = []  # Used for RAM storage
-
-        if USE_FILE_STORAGE and self.file_path.exists():
-            with open(self.file_path, 'r', encoding='utf-8') as _f:
-                self._history = [json.loads(line) for line in _f]
-
-    def _trim_history(self):
-        """Maintain rolling context window."""
-        total_chars = 0
-        trimmed = []
-
-        # Process from newest to oldest
-        for entry in reversed(self._history):
-            if total_chars + entry['chars'] > self.max_context_chars:
-                break
-            total_chars += entry['chars']
-            trimmed.append(entry)
-
-        self._history = list(reversed(trimmed))
-
-        if USE_FILE_STORAGE:
-            with open(self.file_path, 'w', encoding='utf-8') as _f:
-                for entry in self._history:
-                    _f.write(json.dumps(entry) + '\n')
-
-    def add_message(self, role: str, content: str):
-        """Add message to conversation log."""
-        entry = {
-            'role': role,
-            'content': content,
-            'chars': len(content),
-            'timestamp': datetime.now().isoformat()
-        }
-
-        self._history.append(entry)
-        self._trim_history()
-
-    def get_context(self) -> str:
-        """Build conversation history."""
-        recent_history = self._history[-MAX_HISTORY_MESSAGES:]
-
-        context_lines = []
-        for entry in recent_history:
-            role = entry['role'].title()
-            context_lines.append(f"{role}: {entry['content']}")
-
-        return '\n'.join(context_lines)
-
-    def reset(self):
-        """Clear conversation history."""
-        self._history = []
-        if USE_FILE_STORAGE and self.file_path.exists():
-            self.file_path.unlink()
-
-# Dictionary to store ConversationManager instances
-conversation_managers = {}
-
-def contains_prohibited_content(text):
-    """Check for blocked phrases using regex word boundaries."""
-    text_lower = text.lower()
-    matches = []
-    for phrase in BLOCKED_PHRASES:
-        if re.search(rf'\b{re.escape(phrase)}\b', text_lower):
-            matches.append(phrase)
-    return matches if matches else False
-
-def validate_response(text):
-    """Ensure response ends with proper punctuation."""
-    if not text.strip():
-        return False
-    last_char = text.strip()[-1]
-    valid_terminators = ('.', '!', '?', '"', "'", ')', ']', '}', ':', '—')
-    return last_char in valid_terminators
-
-def write_debug_prompt(prompt_data: str):
-    """Write latest prompt to debug file."""
-    with open(DEBUG_PROMPT_FILE, 'w', encoding='utf-8') as _f:
-        _f.write(prompt_data)
-
-async def notify_mod_channels(
-    message: discord.Message,
-    blocked_prompt: str,
-    blocked_phrases: list,
-    response_text: str = None
-):
-    """Send detailed blocked content report."""
-    if not REPORT_CHANNELS:
-        return
-
-    report = (
-        f'🚨 Blocked content detected\n'
-        f'User: {message.author.mention} (`{message.author.id}`)\n'
-        f'Channel: {message.channel.mention}\n'
-        f'**Original Message:**\n```\n{blocked_prompt}\n```\n'
-    )
-
-    if response_text:
-        report += f'**Bot Response:**\n```\n{response_text}\n```\n'
-
-    report += (
-        f'**Blocked Phrases Detected:**\n'
-        f"{', '.join(f'`{phrase}`' for phrase in blocked_phrases)}"
-    )
-
-    for channel_id in REPORT_CHANNELS:
-        try:
-            channel = client.get_channel(int(channel_id))
-            if channel and isinstance(channel, discord.TextChannel):
-                await channel.send(report)
-        except (discord.NotFound, discord.Forbidden) as e:
-            logging.error('Failed to send to channel %s: %s', channel_id, e)
-        except ValueError:
-            logging.error('Invalid channel ID format: %s', channel_id)
-
-@client.event
+@bot.event
 async def on_ready():
-    """Notify successful login."""
-    logging.info('Logged in as %s (ID: %s)', client.user, client.user.id)
+    """Event handler for when the bot is ready."""
+    print(f'Bot is ready! Logged in as {bot.user.name}')
+    print(f'Bot ID: {bot.user.id}')
+    print('Prefix:', COMMAND_PREFIX)
 
-@client.event
-async def on_message(message):
-    """Handle incoming messages."""
-    if message.author == client.user:
-        return
+    # Generate bot invite link with required permissions
+    invite_link = discord.utils.oauth_url(
+        bot.user.id,
+        permissions=discord.Permissions(BOT_PERMISSIONS)
+    )
+    print(f'Invite Link: {invite_link}')
+    print('------')
 
-    if isinstance(message.channel, discord.DMChannel):
-        logging.warning('Ignoring DM from %s', message.author)
-        return
+@bot.event
+async def on_guild_join(guild):
+    """Event handler for when the bot joins a new server."""
+    # Check bot permissions in the guild
+    me = guild.me
+    missing_permissions = []
 
-    if client.user in message.mentions:
-        prompt = message.content.replace(f'<@{client.user.id}>', '').strip()
-        logging.info('Processing prompt: %s', prompt)
+    if not me.guild_permissions.send_messages:
+        missing_permissions.append("Send Messages")
+    if not me.guild_permissions.read_messages:
+        missing_permissions.append("Read Messages")
+    if not me.guild_permissions.embed_links:
+        missing_permissions.append("Embed Links")
+    if not me.guild_permissions.read_message_history:
+        missing_permissions.append("Read Message History")
+    if not me.guild_permissions.view_audit_log:
+        missing_permissions.append("View Audit Log")
 
-        # Handle reset command
-        if prompt == 'RESET':
-            user_id = message.author.id
-            if user_id in conversation_managers:
-                conversation_managers[user_id].reset()
-                await message.channel.send(
-                    "Conversation history reset. "
-                    "'Create in me a clean heart, O God...' (Psalm 51:10)"
+    if missing_permissions:
+        print(f"Warning: Missing permissions in {guild.name}: {', '.join(missing_permissions)}")
+        try:
+            # Try to notify the server owner about missing permissions
+            system_channel = guild.system_channel
+            if system_channel and system_channel.permissions_for(me).send_messages:
+                await system_channel.send(
+                    f"⚠️ Warning: I'm missing some required permissions: {', '.join(missing_permissions)}. "
+                    "Please ensure I have the correct permissions to function properly."
                 )
-            else:
-                await message.channel.send('No conversation history to reset.')
+        except Exception as e:
+            print(f"Could not notify about missing permissions: {e!s}")
+
+
+
+@bot.command(name='reset')
+@commands.has_permissions(administrator=True)  # This ensures only server admins can use the command
+async def reset_context(ctx):
+    """Reset the client context and conversation history (Admin only)."""
+    try:
+        conversation_manager.clear_conversation(str(ctx.channel.id))
+        print(f"Admin {ctx.author} ({ctx.author.id}) reset context in channel {ctx.channel.name}")
+        await ctx.reply("✝️ Context has been reset, brother/sister! Ready for new questions. 🙏")
+    except commands.MissingPermissions:
+        print(f"Non-admin user {ctx.author} ({ctx.author.id}) attempted to use reset command")
+        await ctx.send("⚠️ Sorry brother/sister, only administrators can use this command.")
+    except Exception as e:
+        error_msg = f"Error resetting context: {e!s}"
+        print(f"Error during reset by {ctx.author} ({ctx.author.id}): {error_msg}")
+        print(traceback.format_exc())
+        await ctx.reply("Sorry brother/sister, there was an error resetting the context. Please try again.")
+
+# Track processed messages
+processed_messages = set()
+
+@bot.event
+async def on_message(message):
+    """Event handler for when a message is received."""
+    # Ignore messages from the bot itself
+    if message.author == bot.user:
+        return
+
+    # Check if message was already processed
+    if message.id in processed_messages:
+        return
+
+    # Mark message as processed
+    processed_messages.add(message.id)
+
+    print(f"\nReceived message: {message.content[:100]}...")
+    print(f"Author: {message.author}, Channel: {message.channel.name}")
+
+    # Handle commands first
+    if message.content.startswith(COMMAND_PREFIX):
+        print(f"Processing command: {message.content}")
+        await bot.process_commands(message)
+        return
+
+    # Handle non-prefix reset command
+    if message.content.lower() == "reset":
+        print("Processing text reset command")
+        await handle_text_reset(message)
+        return
+
+    # Skip if message contains a command even if mentioned
+    if any(message.content.lower().startswith(f"{COMMAND_PREFIX}{cmd}") for cmd in ['ask', 'about', 'reset']):
+        return
+
+    # Process mentions and replies
+    is_reply_to_bot = message.reference and message.reference.resolved and message.reference.resolved.author == bot.user
+    was_mentioned = bot.user in message.mentions
+
+    if is_reply_to_bot or was_mentioned:
+        print("Processing mention/reply")
+        question = message.content.replace(f'<@{bot.user.id}>', '').strip()
+        if not question:
+            await message.reply("I don't see a question in your message. Please ask me something about the Bible or theology.")
+            return
+        await process_question(message, question)
+
+async def handle_text_reset(message):
+    """Handle the text-based reset command."""
+    if message.guild and message.author.guild_permissions.administrator:
+        try:
+            conversation_manager.clear_conversation(str(message.channel.id))
+            print(f"Admin {message.author} ({message.author.id}) reset context via text command")
+            await message.reply("✝️ Context has been reset, brother/sister! Ready for new questions. 🙏")
+        except Exception as e:
+            error_msg = f"Error resetting context: {e!s}"
+            print(f"Error during text reset by {message.author} ({message.author.id}): {error_msg}")
+            print(traceback.format_exc())
+            await message.reply("Sorry brother/sister, there was an error resetting the context. Please try again.")
+    else:
+        print(f"Non-admin user {message.author} ({message.author.id}) attempted to use text reset command")
+        await message.reply("⚠️ Sorry brother/sister, only administrators can use this command.")
+
+async def process_question(message, question):
+    """Process questions through TabbyAPI."""
+    try:
+        # Check input for blocked phrases
+        has_blocked, blocked_sentence, blocked_phrase = contains_blocked_phrase(question, blocked_phrases)
+        if has_blocked:
+            await message.reply("⚠️ Your message contains blocked content. Please rephrase your question.")
+            if MONITORING_CHANNEL_ID:
+                monitoring_channel = bot.get_channel(MONITORING_CHANNEL_ID)
+                if monitoring_channel:
+                    await monitoring_channel.send(f"⚠️ Blocked phrase detected in message from {message.author}:\nPhrase: `{blocked_phrase}`\nContext: ```{blocked_sentence}```")
             return
 
-        # Check for prohibited content before processing
-        blocked_phrases = contains_prohibited_content(prompt)
-        if blocked_phrases:
-            await message.channel.send(
-                "I must decline this request. Please consult church leadership. "
-                "'The fear of the LORD is the beginning of knowledge...' (Proverbs 1:7)"
-            )
-            await notify_mod_channels(message, prompt, blocked_phrases)
-            return  # Don't add to history
+        channel_id = str(message.channel.id)
+        print(f"\nProcessing question for channel {channel_id}")
+        print(f"Message author: {message.author}")
 
-        user_id = message.author.id
-        if user_id not in conversation_managers:
-            conversation_managers[user_id] = ConversationManager(user_id)
+        async with message.channel.typing():
+            prompt = create_prompt(question)
+            print(f"\nProcessing question: {question}")
+            completion = None
 
-        cm = conversation_managers[user_id]
+            for attempt in range(MAX_RETRIES):
+                try:
+                    print(f"\nAttempt {attempt + 1}: Sending request to TabbyAPI")
 
-        # Handle message references
-        original_message = message.reference.resolved if message.reference else None
-        if original_message:
-            prompt = (
-                f'{prompt}\n'
-                f'(User is replying to this message: {original_message.content})'
-            )
+                    # Get conversation history including system message
+                    messages = conversation_manager.get_conversation(channel_id)
 
-        # Add user message to history
-        cm.add_message('user', prompt)
+                    # Debug log the conversation state
+                    print(f"\nCurrent conversation state:")
+                    for idx, msg in enumerate(messages):
+                        print(f"Message {idx}: {msg['role']} - First 100 chars: {msg['content'][:100]}...")
 
-        # Build full prompt
-        system_prompt = (
-            f"STRICT DIRECTIVE: {SYSTEM_PROMPT}\n"
-            "IMPERATIVE: Never use terms like 'child', 'son', or similar when addressing users.\n"
-            f"{CHARACTER_CONTEXT}"
-        )
-        full_prompt = (
-            f'<s>[SYSTEM_PROMPT]{system_prompt}[/SYSTEM_PROMPT]\n'
-            f'### Conversation History:\n{cm.get_context()}\n'
-            f'### Current Question:\n[INST]User: {prompt}[/INST]\n'
-            f'Pastor Dave:'
-        )
+                    # Get user's gender role
+                    gender = None
+                    for role in message.author.roles:
+                        if role.name.lower() == "male":
+                            gender = "male"
+                            break
+                        elif role.name.lower() == "female":
+                            gender = "female"
+                            break
 
-        write_debug_prompt(full_prompt)
+                    # Add current question with gender context
+                    gender_context = f"[User is {gender}] " if gender else ""
+                    messages.append({"role": "user", "content": f"{gender_context}{prompt}"})
 
-        # API payload
-        messages = [{'role': 'system', 'content': system_prompt}]
-        last_role = None
+                    # Print conversation context for debugging
+                    print(f"\nSending conversation with {len(messages)} messages")
 
-        # Process history ensuring proper alternation
-        for msg in cm._history[-MAX_HISTORY_MESSAGES*2:]:  # Double buffer for pruning
-            current_role = msg['role']
-            if current_role not in ['user', 'assistant']:
-                continue
+                    # Calculate total prompt length
+                    total_length = sum(len(msg['content']) for msg in messages)
+                    if total_length > MAX_PROMPT_LENGTH:
+                        # Remove oldest messages until within limit
+                        while total_length > MAX_PROMPT_LENGTH and len(messages) > 2:  # Keep system and latest
+                            removed = messages.pop(1)  # Remove second message (after system)
+                            total_length -= len(removed['content'])
+                        print(f"Trimmed conversation to {len(messages)} messages to meet length limit")
 
-            if last_role == current_role:
-                continue
+                    # Log prompt if enabled
+                    if ENABLE_PROMPT_LOGGING:
+                        try:
+                            with open(PROMPT_LOG_FILE, "a") as f:
+                                f.write(f"\n--- Prompt at {datetime.now().isoformat()} ---\n")
+                                for msg in messages:
+                                    f.write(f"\n[{msg['role']}]\n{msg['content']}\n")
+                                f.write("\n--------------------\n")
+                        except Exception as e:
+                            print(f"Error logging prompt: {e}")
 
-            messages.append({'role': current_role, 'content': msg['content']})
-            last_role = current_role
+                    completion = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            client.chat.completions.create,
+                            model="gpt-3.5-turbo", #changed model name.  Original model may not be available in tabby.
+                            messages=messages,
+                            temperature=0.0,  # Set to 0 for deterministic output
+                            max_tokens=15872,
+                            top_p=1.0,  # Set to 1.0 to disable nucleus sampling
+                            frequency_penalty=0.0,  # Disable frequency penalty
+                            presence_penalty=0.0  # Disable presence penalty
+                        ),
+                        timeout=TIMEOUT_SECONDS
+                    )
 
-        # Add current prompt ensuring alternation
-        if last_role == 'user':
-            logging.debug('Unexpected message sequence, pruning last message')
-            messages = messages[:-1]
+                    if completion and hasattr(completion, 'choices') and completion.choices:
+                        content = completion.choices[0].message.content
+                        if content and content.strip():
+                            # Store both the prompt and response in conversation history
+                            conversation_manager.add_message(channel_id, "user", prompt)
+                            conversation_manager.add_message(channel_id, "assistant", content)
+                            print(f"\nStored in conversation history:")
+                            print(f"User: {prompt[:100]}...")
+                            print(f"Assistant: {content[:100]}...")
+                            break
+                        else:
+                            print("Error: Empty content in response")
+                            raise Exception("Empty response from API")
+                    else:
+                        print(f"Error: Invalid completion structure: {completion}")
+                        raise Exception("Invalid API response structure")
 
-        messages.append({'role': 'user', 'content': prompt})
+                    if attempt == MAX_RETRIES - 1:
+                        raise Exception("Failed to get valid response after all attempts")
 
-        payload = {
-            'max_tokens': MAX_API_TOKENS,
-            'mode': 'chat',
-            'messages': messages,
-            'character': 'Pastor Dave',
-            'temperature': 0.0,
-            'repetition_penalty': 1.01,
-            'stopping_strings': ['\n', 'User:', 'Pastor Dave:']
-        }
+                except asyncio.TimeoutError:
+                    print(f"Timeout on attempt {attempt + 1}")
+                    if attempt == MAX_RETRIES - 1:
+                        raise
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    print(f"TabbyAPI Error (Attempt {attempt + 1}/{MAX_RETRIES}): {e!s}")
+                    print(traceback.format_exc())
+                    if attempt == MAX_RETRIES - 1:
+                        raise
+                    await asyncio.sleep(1)
 
-        # API request
-        try:
-            response = session.post(TABBY_API_URL, json=payload)
-            response.raise_for_status()
-            response_data = response.json()
-            response_text = response_data['choices'][0]['message']['content'].strip()
-            response_text = response_text.removeprefix('Pastor Dave: ')
+            if completion and hasattr(completion, 'choices') and completion.choices[0].message.content.strip():
+                response_chunks = await format_response(completion.choices[0].message.content)
+                if response_chunks:
+                    # Check output for blocked phrases
+                    has_blocked = False
+                    for chunk in response_chunks:
+                        chunk_blocked, blocked_sentence, blocked_phrase = contains_blocked_phrase(chunk, blocked_phrases)
+                        if chunk_blocked:
+                            has_blocked = True
+                            break
 
-            # Check response for blocked content
-            response_blocked = contains_prohibited_content(response_text)
-            if response_blocked:
-                logging.warning('Blocked response content')
-                await notify_mod_channels(message, prompt, response_blocked, response_text)
-                return  # Don't add to history
+                    if has_blocked:
+                        await message.reply("⚠️ Generated response contained blocked content. Please try rephrasing your question.")
+                        if MONITORING_CHANNEL_ID:
+                            monitoring_channel = bot.get_channel(MONITORING_CHANNEL_ID)
+                            if monitoring_channel:
+                                await monitoring_channel.send(f"⚠️ Blocked phrase detected in bot response to {message.author}:\nPhrase: `{blocked_phrase}`\nContext: ```{blocked_sentence}```")
+                        return
 
-            if not validate_response(response_text):
-                logging.warning('Incomplete response ending with: %s', response_text[-20:])
-                return
+                    # Send chunks with random delays
+                    for i, chunk in enumerate(response_chunks):
+                        print(f"\nSending response chunk {i+1}/{len(response_chunks)}, length: {len(chunk)}")
+                        print(f"First 100 chars: {chunk[:100]}...")
+                        if i == 0:
+                            await message.reply(chunk)
+                        else:
+                            await asyncio.sleep(random.uniform(1, 2))
+                            await message.channel.send(chunk)
+                else:
+                    raise Exception("Empty formatted response")
+            else:
+                raise Exception("Failed to get valid completion after all retries")
 
-            # Add bot response to history
-            cm.add_message('assistant', response_text)
-
-            footer_text = '[This reply is AI generated, may contain errors, and as such may not represent the opinion of Solas.]'  # pylint: disable=line-too-long
-            await send_long_message(message.channel, response_text, footer_text)
-
-        except requests.exceptions.RequestException as e:
-            logging.error('API communication error: %s', e)
-            await message.channel.send('Response generation failed. Please try again.')
-        except KeyError as e:
-            logging.error('API response format error: %s', e)
-            await message.channel.send('Response format error. Please try again.')
-
-async def send_long_message(channel, response_text, footer_text):
-    """Handle message splitting with footer."""
-    max_chunk = 1980
-
-    chunks = []
-    while response_text:
-        if len(response_text) <= max_chunk:
-            chunks.append(response_text)
-            break
-
-        lookback_start = max(0, max_chunk - 100)
-        window = response_text[lookback_start:max_chunk]
-
-        split_candidates = [
-            ('\n\n', 2),
-            ('. ', 2),
-            ('; ', 2),
-            (', ', 2),
-            (' ', 1)
-        ]
-
-        split_at = None
-        for marker, offset in split_candidates:
-            pos = window.rfind(marker)
-            if pos != -1:
-                split_at = lookback_start + pos + offset
+    except asyncio.TimeoutError:
+        # Get user's gender role
+        gender = "brother/sister"
+        for role in message.author.roles:
+            if role.name.lower() == "male":
+                gender = "brother"
+                break
+            elif role.name.lower() == "female":
+                gender = "sister"
                 break
 
-        if split_at and split_at > 0:
-            chunks.append(response_text[:split_at])
-            response_text = response_text[split_at:].lstrip()
-        else:
-            chunks.append(response_text[:max_chunk])
-            response_text = response_text[max_chunk:]
+        error_message = f"Sorry, {gender}, the response took too long. Please try asking your question again."
+        await message.reply(error_message)
+        print(f"Timeout while processing question: {question}")
+    except Exception as e:
+        # Get user's gender role
+        gender = "brother/sister"
+        for role in message.author.roles:
+            if role.name.lower() == "male":
+                gender = "brother"
+                break
+            elif role.name.lower() == "female":
+                gender = "sister"
+                break
 
-    # Send chunks with random delays
-    for index, chunk in enumerate(chunks):
-        await channel.send(chunk)
-        if index < len(chunks) - 1:
-            await asyncio.sleep(random.uniform(1.5, 2.5))
+        error_message = f"Sorry, {gender}, I'm experiencing some technical difficulties. Please try again later."
+        await message.reply(error_message)
+        print(f"Error processing question: {e!s}")
+        print(traceback.format_exc())
 
-    # Send footer
-    await channel.send(footer_text)
+@bot.command(name='ask')
+async def ask_theological_question(ctx, *, question: str):
+    """
+    Handle theological questions and respond in Pastor style.
 
-if __name__ == '__main__':
-    client.run(TOKEN)
+    Usage: !ask <your theological question>
+    """
+    print(f"\nProcessing !ask command from {ctx.author}")
+    print(f"Question: {question[:100]}...")
+
+    # Check if this is a duplicate command processing
+    if hasattr(ctx.message, '_command_processed'):
+        print("Skipping duplicate command processing")
+        return
+
+    # Mark the message as processed
+    setattr(ctx.message, '_command_processed', True)
+    await process_question(ctx, question)
+
+@bot.command(name='about')
+async def about_command(ctx):
+    """Display help information about the bot."""
+    await ctx.send(HELP_MESSAGE)
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Global error handler for bot commands."""
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("⚠️ Sorry brother/sister, you don't have permission to use this command. Only administrators can use it.")
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send("Brother/Sister, I don't recognize that command. Please use !about for guidance.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Please provide a question after the !ask command.")
+    elif isinstance(error, commands.PrivilegedIntentsRequired):
+        await ctx.send(
+            "🚨 **Message Content Intent Not Enabled**\n\n"
+            "The bot requires Message Content Intent to be enabled in the Discord Developer Portal. "
+            "Please follow these steps:\n"
+            "1. Go to https://discord.com/developers/applications\n"
+            "2. Select your bot application\n"
+            "3. Click on 'Bot' in the left sidebar\n"
+            "4. Enable 'Message Content Intent' under 'Privileged Gateway Intents'\n"
+            "5. Save your changes\n\n"
+            "Once done, the bot will need to be restarted."
+        )
+    else:
+        await ctx.send(f"An error occurred: {error!s}")
+        # Log the error for debugging
+        print(f"Command error: {error!s}")
+
+def run_bot():
+    """Run the Discord bot."""
+    token = os.getenv('DISCORD_TOKEN')
+    if not token:
+        raise ValueError("No Discord token found. Please set the DISCORD_TOKEN environment variable.")
+    bot.run(token)
+
+if __name__ == "__main__":
+    try:
+        run_bot()  # Run the Discord bot
+    except Exception as e:
+        print(f"Bot error: {e}")
