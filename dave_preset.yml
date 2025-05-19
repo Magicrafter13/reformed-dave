@@ -9,13 +9,13 @@
 
 # MARK: Misc generation parameters
 max_tokens:
-  override: 8192
+  override: 15872
   force: false
 min_tokens:
   override: 0
   force: false
 generate_window:
-  override: 8192
+  override: 15872
   force: false
 stop:
   override: []
@@ -43,16 +43,16 @@ temperature:
   force: true
 temperature_last:
   override: 0
-  force: true
+  force: false
 min_temp:
   override: 0
-  force: false
+  force: true
 max_temp:
   override: 0
-  force: false
+  force: true
 temp_exponent:
-  override: 1.0
-  force: false
+  override: 0
+  force: true
 smoothing_factor:
   override: 0.0
   force: false
@@ -92,16 +92,16 @@ frequency_penalty:
   force: false
 presence_penalty:
   override: 0.0
-  force: false
+  force: true
 repetition_penalty:
-  override: 1.0
+  override: 1
   force: true
 repetition_decay:
   override: 0
-  force: false
+  force: true
 penalty_range:
-  override: -1
-  force: false
+  override: 0
+  force: true
 
 # MARK: DRY
 dry_multiplier:

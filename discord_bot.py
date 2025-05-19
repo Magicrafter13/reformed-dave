@@ -51,7 +51,7 @@ bot = commands.Bot(
 # Initialize OpenAI client with TabbyAPI endpoint
 client = OpenAI(
     base_url="http://127.0.0.1:5000/v1",
-    api_key="not-needed"  # TabbyAPI doesn't require an API key
+    api_key=os.getenv('TABBYAPI_KEY')  # TabbyAPI doesn't require an API key
 )
 
 @bot.event
@@ -257,7 +257,7 @@ async def process_question(message, question):
                     completion = await asyncio.wait_for(
                         asyncio.to_thread(
                             client.chat.completions.create,
-                            model="Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_5.5bpw_H8",
+                            model="Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_4.5bpw_H8",
                             messages=messages,
                             temperature=0.0,  # Set to 0 for deterministic output
                             max_tokens=15872,

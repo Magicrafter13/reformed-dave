@@ -18,7 +18,7 @@ network:
   # Disable HTTP token authentication with requests.
   # WARNING: This will make your instance vulnerable!
   # Turn on this option if you are ONLY connecting from localhost.
-  disable_auth: true
+  disable_auth: false
 
   # Disable fetching external content in response to requests, such as images from URLs.
   disable_fetch_requests: false
@@ -34,14 +34,14 @@ network:
 # Options for logging
 logging:
   # Enable prompt logging (default: False).
-  log_prompt: true
+  log_prompt: false
 
   # Enable generation parameter logging (default: False).
-  log_generation_params: true
+  log_generation_params: false
 
   # Enable request logging (default: False).
   # NOTE: Only use this for debugging!
-  log_requests: 
+  log_requests: false
 
 # Options for model overrides and loading
 # Please read the comments to understand how arguments are handled
@@ -49,7 +49,7 @@ logging:
 model:
   # Directory to look for models (default: models).
   # Windows users, do NOT put this path in quotes!
-  model_dir:
+  model_dir: models
 
   # Allow direct loading of models from a completion or chat completion request (default: False).
   # This method of loading is strict by default.
@@ -67,16 +67,20 @@ model:
   # An initial model to load.
   # Make sure the model is located in the model directory!
   # REQUIRED: This must be filled out to load a model on startup.
-  model_name: Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_5.5bpw_H8
+  model_name: Reformed-Christian-Bible-Expert-v2.1-12B_EXL2_4.5bpw_H8
 
   # Names of args to use as a fallback for API load requests (default: []).
   # For example, if you always want cache_mode to be Q4 instead of on the inital model load, add "cache_mode" to this array.
   # Example: ['max_seq_len', 'cache_mode'].
   use_as_default: []
 
+  # Backend to use for this model (auto-detect if not specified)
+  # Options: exllamav2, exllamav3
+  backend:
+
   # Max sequence length (default: Empty).
   # Fetched from the model's base sequence length in config.json by default.
-  max_seq_len: 8192
+  max_seq_len: 15872
 
   # Load model with tensor parallelism.
   # Falls back to autosplit if GPU split isn't provided.
@@ -95,6 +99,9 @@ model:
   # Used with tensor parallelism.
   gpu_split: []
 
+  # NOTE: If a model has YaRN rope scaling, it will automatically be enabled by ExLlama.
+  # rope_scale and rope_alpha settings won't apply in this case.
+
   # Rope scale (default: 1.0).
   # Same as compress_pos_emb.
   # Use if the model was trained on long context with rope.
@@ -107,13 +114,14 @@ model:
   rope_alpha:
 
   # Enable different cache modes for VRAM savings (default: FP16).
-  # Possible values: 'FP16', 'Q8', 'Q6', 'Q4'.
+  # Possible values for exllamav2: 'FP16', 'Q8', 'Q6', 'Q4'.
+  # For exllamav3, specify the pair k_bits,v_bits where k_bits and v_bits are integers from 2-8 (i.e. 8,8).
   cache_mode: Q8
 
   # Size of the prompt cache to allocate (default: max_seq_len).
   # Must be a multiple of 256 and can't be less than max_seq_len.
   # For CFG, set this to 2 * max_seq_len.
-  cache_size:  16384
+  cache_size: 31744
 
   # Chunk size for prompt ingestion (default: 2048).
   # A lower value reduces VRAM usage but decreases ingestion speed.
@@ -136,12 +144,6 @@ model:
   # Enables vision support if the model supports it. (default: False)
   vision: false
 
-  # Number of experts to use per token.
-  # Fetched from the model's config.json if empty.
-  # NOTE: For MoE models only.
-  # WARNING: Don't set this unless you know what you're doing!
-  num_experts_per_token:
-
 # Options for draft models (speculative decoding)
 # This will use more VRAM!
 draft_model:
@@ -163,8 +165,13 @@ draft_model:
   draft_rope_alpha:
 
   # Cache mode for draft models to save VRAM (default: FP16).
-  # Possible values: 'FP16', 'Q8', 'Q6', 'Q4'.
+  # Possible values for exllamav2: 'FP16', 'Q8', 'Q6', 'Q4'.
+  # For exllamav3, specify the pair k_bits,v_bits where k_bits and v_bits are integers from 2-8 (i.e. 8,8).
   draft_cache_mode: Q8
+
+  # An integer array of GBs of VRAM to split between GPUs (default: []).
+  # If this isn't filled in, the draft model is autosplit.
+  draft_gpu_split: []
 
 # Options for Loras
 lora:
@@ -211,10 +218,6 @@ developer:
 
   # Enable the torch CUDA malloc backend (default: False).
   cuda_malloc_backend: false
-
-  # Run asyncio using Uvloop or Winloop which can improve performance.
-  # NOTE: It's recommended to enable this, but if something breaks turn this off.
-  uvloop: false
 
   # Set process to use a higher priority.
   # For realtime process priority, run as administrator or sudo.
