@@ -393,7 +393,8 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("⚠️ Sorry brother/sister, you don't have permission to use this command. Only administrators can use it.")
     elif isinstance(error, commands.CommandNotFound):
-        await ctx.send("Brother/Sister, I don't recognize that command. Please use !about for guidance.")
+        return
+        #await ctx.send("Brother/Sister, I don't recognize that command. Please use !about for guidance.")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Please provide a question after the !ask command.")
     elif isinstance(error, commands.PrivilegedIntentsRequired):
